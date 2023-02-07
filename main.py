@@ -95,8 +95,22 @@ def test(model, device, test_loader,test_acc,test_losses,criterion):
   test_acc.append(100. * correct / len(test_loader.dataset))
   return 100. * correct / len(test_loader.dataset)
 
+def get_model():
+  '''
+  This method returns resnet34 model
+  '''
+  return resnet.ResNet34("BN")
 
-def experiment(config_dict, train_loader, test_loader):
+def print_model_summary(model, device):
+  '''
+    This method returns the model summary.
+    :param model: model
+    :param device: device
+  '''
+  cifar_model = model.to(device)
+  return summary(cifar_model, input_size=(3, 32, 32))
+
+def experiment(model):
   '''
   The method performs the experiment as per our configuration.
   To preserve gpu usage, we are exiting while we reach the target validation accuracy.
@@ -112,7 +126,7 @@ def experiment(config_dict, train_loader, test_loader):
   test_accuracy = []
 
   device = utils.get_device()
-  model = resnet.ResNet34("BN").to(device)
+  model = model.to(device)
   scheduler, optimizer = utils.get_scheduler(train_loader, config_dict, model)
 
   for epoch in range(1, config_dict['epochs'] + 1):
