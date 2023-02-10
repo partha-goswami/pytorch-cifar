@@ -11,6 +11,7 @@ import torch.optim as optim
 from torch.optim.lr_scheduler import StepLR, OneCycleLR
 import seaborn as sns
 import matplotlib.pyplot as plt
+import gradcam
 
 
 def get_device():
@@ -28,6 +29,12 @@ def get_config_values():
     '''
 
     dict_config_values = {}
+
+    dict_config_values['class_names'] = ['plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck']
+    dict_config_values['misclassified_count'] = 20
+
+    dict_config_values['gradcam_target_layers'] = ['layer4']
+
     dict_config_values['dropout_rate'] = 0.05
     dict_config_values['batch_size'] = 256
     dict_config_values['no_of_workers'] = 2
@@ -38,16 +45,17 @@ def get_config_values():
     dict_config_values['L2_factor'] = 0.0001
 
     dict_config_values['albumentation'] = {
+        'padIfNeeded_min_height': 36,
+        'padIfNeeded_min_width': 36,
+        'padIfNeeded_probability': 1,
+
         'randomCrop_Height': 32,
         'randomCrop_Width': 32,
 
-        'coarseDropout_max_holes': 1,
-        'coarseDropout_min_holes': 1,
-        'coarseDropout_max_height': 16,
-        'coarseDropout_max_width': 16,
-        'coarseDropout_min_height': 16,
-        'coarseDropout_min_width': 16,
-        'coarseDropout_cutout_probability': 0.5
+        'cutout_probability': 0.5,
+        'cutout_num_holes': 1,
+        'cutout_max_h_size': 16,
+        'cutout_max_w_size': 16
     }
     return dict_config_values
 
@@ -69,16 +77,16 @@ def apply_albumentation(config_dict):
     cifar10_mean, cifar10_std = get_cifar10_stats()
 
     train_transforms = albumentations.Compose(
-        [albumentations.RandomCrop(height=config_dict['albumentation']['randomCrop_Height'],
+        [albumentations.PadIfNeeded(min_height=config_dict['albumentation']['padIfNeeded_min_height'],
+                                    min_width=config_dict['albumentation']['padIfNeeded_min_width'],
+                                    p=config_dict['albumentation']['padIfNeeded_probability']),
+         albumentations.RandomCrop(height=config_dict['albumentation']['randomCrop_Height'],
                                    width=config_dict['albumentation']['randomCrop_Width']),
-         albumentations.CoarseDropout(max_holes=config_dict['albumentation']['coarseDropout_max_holes'],
-                                      min_holes=config_dict['albumentation']['coarseDropout_min_holes'],
-                                      max_height=config_dict['albumentation']['coarseDropout_max_height'],
-                                      max_width=config_dict['albumentation']['coarseDropout_max_width'],
-                                      p=config_dict['albumentation']['coarseDropout_cutout_probability'],
-                                      fill_value=tuple([x * 255.0 for x in cifar10_mean]),
-                                      min_height=config_dict['albumentation']['coarseDropout_min_height'],
-                                      min_width=config_dict['albumentation']['coarseDropout_min_width']),
+         albumentations.Cutout(num_holes=config_dict['albumentation']['cutout_num_holes'],
+                               max_h_size=config_dict['albumentation']['cutout_max_h_size'],
+                               max_w_size=config_dict['albumentation']['cutout_max_w_size'],
+                               fill_value=tuple([x * 255.0 for x in cifar10_mean]),
+                               p=config_dict['albumentation']['cutout_probability']),
          albumentations.Normalize(mean=cifar10_mean, std=cifar10_std, always_apply=True),
          ToTensorV2()
          ])
@@ -135,3 +143,95 @@ def get_scheduler(train_loader, config_dict, model):
     optimizer = get_optimizer(config_dict, model)
     return OneCycleLR(optimizer, max_lr=config_dict['learning_rate'], epochs=config_dict['epochs'],
                       steps_per_epoch=len(train_loader)), optimizer
+
+def identify_wrong_predictions(model):
+    '''
+    Identifies the wrong predictions and plots them
+    :param model: model
+    :return: None
+    '''
+    config_dict = get_config_values()
+    _, test_loader = get_data_loaders(config_dict)
+    device = get_device()
+    class_names = config_dict['class_names']
+    misclassified_max_count = config_dict['misclassified_count']
+    #current_misclassified_count = 0
+
+    wrong_images, wrong_label, correct_label = [], [], []
+
+    with torch.no_grad():
+        for data, target in test_loader:
+            # if current_misclassified_count > misclassified_max_count:
+            # break
+
+            data, target = data.to(device), target.to(device)
+            output = model(data)
+            pred = output.argmax(dim=1, keepdim=True).squeeze()
+
+            # if pred.eq(target.view_as(pred)) == False:
+            wrong_pred = (pred.eq(target.view_as(pred)) == False)
+            wrong_images.append(data[wrong_pred])
+            wrong_label.append(pred[wrong_pred])
+            correct_label.append(target.view_as(pred)[wrong_pred])
+            wrong_predictions = list(zip(torch.cat(wrong_images), torch.cat(wrong_label), torch.cat(correct_label)))
+            # current_misclassified_count += 1
+
+        fig = plt.figure(figsize=(10, 12))
+        fig.tight_layout()
+        for i, (img, pred, correct) in enumerate(wrong_predictions[:misclassified_max_count]):
+            img, pred, target = img.cpu().numpy(), pred.cpu(), correct.cpu()
+            img = np.transpose(img, (1, 2, 0)) / 2 + 0.5
+            ax = fig.add_subplot(5, 5, i + 1)
+            ax.axis('off')
+            ax.set_title(f'\nactual : {class_names[target.item()]}\npredicted : {class_names[pred.item()]}',
+                         fontsize=10)
+            ax.imshow(img)
+
+        plt.show()
+    return wrong_predictions
+
+
+def plot_metrics(train_accuracy, train_losses, test_accuracy, test_losses):
+    '''
+    The method plots model metrics
+    :param train_accuracy: train accuracy
+    :param train_losses: train loss
+    :param test_accuracy: test accuracy
+    :param test_losses: test loss
+    :return: None
+    '''
+    sns.set(font_scale=1)
+    plt.rcParams["figure.figsize"] = (25, 6)
+
+    fig, (ax1, ax2) = plt.subplots(1, 2)
+    ax1.plot(np.array(test_losses), 'b', label="Validation Loss")
+
+    ax1.set_title("Validation Loss")
+    ax1.set_xlabel("Epoch")
+    ax1.set_ylabel("Loss")
+    ax1.legend()
+
+    ax2.plot(np.array(test_accuracy), 'b', label="Validation Accuracy")
+
+    ax2.set_title("Validation Accuracy")
+    ax2.set_xlabel("Epoch")
+    ax2.set_ylabel("Loss")
+    ax2.legend()
+
+    plt.show()
+
+def plot_gradCAM(wrong_predictions, start = 0, end, model):
+    '''
+    This method plots gradCAM outputs by taking help from gradcam.py
+    :param wrong_predictions: wrong predictions
+    :param start: start
+    :param end: end
+    :param model: model
+    :return: None
+    '''
+    config_dict = get_config_values()
+    device = get_device()
+    gradcam_output, probs, predicted_classes = generate_gradcam(wrong_predictions[start:end],
+                                                                model, config_dict['gradcam_target_layers'], device)
+    plot_gradcam(gradcam_output, config_dict['gradcam_target_layers'],
+                 config_dict['class_names'], (3, 32, 32), predicted_classes, wrong_predictions[start:end])
