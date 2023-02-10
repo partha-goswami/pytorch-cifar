@@ -130,9 +130,6 @@ def experiment(model):
         train(model, device, train_loader, optimizer, epoch, train_accuracy, train_losses, config_dict['L1_factor'],
               scheduler, nn.CrossEntropyLoss())
 
-        test(model, device, test_loader, test_accuracy, test_losses, nn.CrossEntropyLoss())
+        test(model, device, test_loader, test_accuracy, test_losses, nn.CrossEntropyLoss())    
 
-    with open('data.pickle', 'wb') as f:
-        pickle.dump((train_accuracy, train_losses, test_accuracy, test_losses), f)
-
-    return (train_accuracy, train_losses, test_accuracy, test_losses)
+    return (model, train_accuracy, train_losses, test_accuracy, test_losses)
