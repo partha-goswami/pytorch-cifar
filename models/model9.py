@@ -31,9 +31,9 @@ class UltimusBlock(nn.Module):
         k = k.view(k.size(0), 8, -1)
         q = q.view(q.size(0), 8, -1)
         v = v.view(v.size(0), 8, -1)
-
-        am = self.softmax(torch.bmm(q.transpose(1, 2), k) / 8 ** 0.5)
-        z = torch.bmm(am, v).view(v.size(0), -1)
+        
+        am = self.softmax(torch.bmm(q.transpose(1, 2), k)) / 8 ** 0.5
+        z = torch.bmm(v, am).view(v.size(0), -1)
         out = self.out(z)
         return out
 
