@@ -43,6 +43,8 @@ def get_config_values():
     dict_config_values['epochs'] = 20
     dict_config_values['L1_factor'] = 0
     dict_config_values['L2_factor'] = 0.0001
+    
+    dict_config_values['Optimizer_Type'] = 'SGD'
 
     dict_config_values['albumentation'] = {
         'padIfNeeded_min_height': 36,
@@ -130,7 +132,13 @@ def get_optimizer(config_dict, model):
     :param config_dict: config dictionary
     :param model: model
     '''
-    return optim.Adam(model.parameters(), lr=config_dict['learning_rate'], weight_decay=config_dict['L2_factor'])
+    if config_dict['Optimizer_Type'] = 'Adam':
+        optimizer =  optim.Adam(model.parameters(), lr=config_dict['learning_rate'], weight_decay=config_dict['L2_factor'])
+    else:
+        optimizer = optim.SGD(model.parameters(), lr=config_dict['lr_finder_learning_rate'],
+                     momentum=config_dict['lr_finder_momentum'],weight_decay=config_dict['L2_factor']) 
+    
+    return optimizer
 
 
 def get_scheduler(train_loader, config_dict, model):
